@@ -49,16 +49,28 @@ FetchContent_MakeAvailable(ftxui)
 # Project Structure
 #==============================================================================
 
-#==============================================================================
-# Main Executable
-#==============================================================================
-add_executable(${PROJECT_NAME} src/main_form_input.cpp)
-# add_executable(${PROJECT_NAME} src/main_counter.cpp)
-# add_executable(${PROJECT_NAME} src/main_4_clicker.cpp)
+# #==============================================================================
+# # Main Executable
+# #==============================================================================
+# add_executable(${PROJECT_NAME} src/main_form_input.cpp)
+# # add_executable(${PROJECT_NAME} src/main_counter.cpp)
+# # add_executable(${PROJECT_NAME} src/main_4_clicker.cpp)
 
-# Core dependencies (always included)
+# # Core dependencies (always included)
+# target_link_libraries(
+#   ${PROJECT_NAME}
+#   PRIVATE fmt::fmt
+#           ftxui::dom
+#           ftxui::screen
+#           ftxui::component)
+
+#==============================================================================
+# E-Paper Emulator Example
+#==============================================================================
+add_executable(ftxui-epaper src/main_epaper.cpp)
+target_include_directories(ftxui-epaper PRIVATE src)
 target_link_libraries(
-  ${PROJECT_NAME}
+  ftxui-epaper
   PRIVATE fmt::fmt
           ftxui::dom
           ftxui::screen
