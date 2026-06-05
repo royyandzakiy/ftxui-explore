@@ -1,0 +1,181 @@
+{
+	"version": 4,
+	"cmakeMinimumRequired": {
+		"major": 3,
+		"minor": 20,
+		"patch": 0
+	},
+	"configurePresets": [
+		{
+			"name": "base",
+			"hidden": true,
+			"binaryDir": "${sourceDir}/build/${presetName}",
+			"cacheVariables": {
+				"CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+			}
+		},
+		{
+			"name": "win-vcpkg-base",
+			"hidden": true,
+			"inherits": "base",
+			"cacheVariables": {
+				"VCPKG_TARGET_TRIPLET": "x64-windows"
+			}
+		},
+		{
+			"name": "msvc-base",
+			"hidden": true,
+			"inherits": "win-vcpkg-base",
+			"generator": "Visual Studio 17 2022",
+			"architecture": {
+				"value": "x64",
+				"strategy": "external"
+			},
+			"cacheVariables": {
+				"CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/bin/msvc"
+			}
+		},
+		{
+			"name": "clang-cl-base",
+			"hidden": true,
+			"inherits": "win-vcpkg-base",
+			"generator": "Ninja",
+			"cacheVariables": {
+				"CMAKE_C_COMPILER": "clang-cl",
+				"CMAKE_CXX_COMPILER": "clang-cl",
+				"CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/bin/clang-cl"
+			}
+		},
+		{
+			"name": "mingw-base",
+			"hidden": true,
+			"inherits": "base",
+			"generator": "Ninja",
+			"cacheVariables": {
+				"CMAKE_C_COMPILER": "gcc",
+				"CMAKE_CXX_COMPILER": "g++",
+				"VCPKG_TARGET_TRIPLET": "x64-mingw-static",
+				"CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/bin/mingw"
+			}
+		},
+		{
+			"name": "linux-base",
+			"hidden": true,
+			"inherits": "base",
+			"generator": "Ninja",
+			"cacheVariables": {
+				"VCPKG_TARGET_TRIPLET": "x64-linux",
+				"CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/bin/linux"
+			}
+		},
+		{
+			"name": "msvc-debug",
+			"inherits": "msvc-base",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Debug"
+			}
+		},
+		{
+			"name": "msvc-release",
+			"inherits": "msvc-base",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Release"
+			}
+		},
+		{
+			"name": "clang-cl-debug",
+			"inherits": "clang-cl-base",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Debug"
+			}
+		},
+		{
+			"name": "clang-cl-release",
+			"inherits": "clang-cl-base",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Release"
+			}
+		},
+		{
+			"name": "mingw-debug",
+			"inherits": "mingw-base",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Debug"
+			}
+		},
+		{
+			"name": "mingw-release",
+			"inherits": "mingw-base",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Release"
+			}
+		},
+		{
+			"name": "clang-linux-debug",
+			"inherits": "linux-base",
+			"cacheVariables": {
+				"CMAKE_C_COMPILER": "clang",
+				"CMAKE_CXX_COMPILER": "clang++",
+				"CMAKE_BUILD_TYPE": "Debug",
+				"ENABLE_COVERAGE": "ON"
+			}
+		},
+		{
+			"name": "gcc-linux-debug",
+			"inherits": "linux-base",
+			"cacheVariables": {
+				"CMAKE_C_COMPILER": "gcc",
+				"CMAKE_CXX_COMPILER": "g++",
+				"CMAKE_BUILD_TYPE": "Debug",
+				"ENABLE_COVERAGE": "ON"
+			}
+		}
+	],
+	"buildPresets": [
+		{
+			"name": "base-build",
+			"hidden": true,
+			"inheritConfigureEnvironment": true
+		},
+		{
+			"name": "msvc-debug",
+			"inherits": "base-build",
+			"configurePreset": "msvc-debug",
+			"configuration": "Debug"
+		},
+		{
+			"name": "clang-cl-debug",
+			"inherits": "base-build",
+			"configurePreset": "clang-cl-debug"
+		},
+		{
+			"name": "mingw-debug",
+			"inherits": "base-build",
+			"configurePreset": "mingw-debug"
+		},
+		{
+			"name": "gcc-linux-debug",
+			"inherits": "base-build",
+			"configurePreset": "gcc-linux-debug"
+		}
+	],
+	"testPresets": [
+		{
+			"name": "base-test",
+			"hidden": true,
+			"output": {
+				"outputOnFailure": true
+			}
+		},
+		{
+			"name": "test-msvc-debug",
+			"inherits": "base-test",
+			"configurePreset": "msvc-debug"
+		},
+		{
+			"name": "test-mingw-debug",
+			"inherits": "base-test",
+			"configurePreset": "mingw-debug"
+		}
+	]
+}

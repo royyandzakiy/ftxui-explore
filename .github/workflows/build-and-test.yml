@@ -1,0 +1,70 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build with ${{ matrix.compiler.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler:
+          - { name: GCC,   cmd: g++-13,      triplet: x64-linux, build_dir: gcc }
+          - { name: Clang, cmd: clang++-17,  triplet: x64-linux, build_dir: clang }
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++-13 clang-17 cmake ninja-build curl zip unzip tar
+    
+    - name: Setup vcpkg
+      run: |
+        git clone https://github.com/Microsoft/vcpkg.git
+        ./vcpkg/bootstrap-vcpkg.sh
+        echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $GITHUB_ENV
+        echo "${{ github.workspace }}/vcpkg" >> $GITHUB_PATH
+    
+    - name: Install dependencies via vcpkg
+      run: |
+        ./vcpkg/vcpkg install --triplet ${{ matrix.compiler.triplet }}
+        # Or explicitly install from vcpkg.json:
+        # ./vcpkg/vcpkg install fmt gtest --triplet ${{ matrix.compiler.triplet }}
+    
+    - name: Configure CMake with vcpkg
+      run: |
+        cmake -B build/${{ matrix.compiler.build_dir }} \
+          -G Ninja \
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler.cmd }} \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DENABLE_SANITIZERS=OFF \
+          -DVCPKG_ROOT_PATH=${{ github.workspace }}/vcpkg \
+          -DVCPKG_SKIP_INSTALL_CHECK=ON \
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
+          -DVCPKG_TARGET_TRIPLET=${{ matrix.compiler.triplet }}
+    
+    - name: Build
+      run: cmake --build build/${{ matrix.compiler.build_dir }}
+    
+    - name: Run program
+      run: |
+        echo "=== Running ${{ matrix.compiler.name }} build ==="
+        ./build/${{ matrix.compiler.build_dir }}/cmake_project_template
+        echo "=== Exit code: $? ==="
+    
+    - name: Upload build artifacts (optional)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.compiler.build_dir }}-binary
+        path: build/${{ matrix.compiler.build_dir }}/cmake_project_template
+        retention-days: 7

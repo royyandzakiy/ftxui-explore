@@ -1,0 +1,4 @@
+# cmake/local_vcpkg.cmake.example
+# Copy to cmake/local_vcpkg.cmake and customize accordingly
+
+set(VCPKG_ROOT_PATH "/home/path/to/vcpkg")
