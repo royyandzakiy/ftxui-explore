@@ -28,7 +28,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(ENABLE_STRICT_COMPILER)
   if(MSVC)
-    # add_compile_options(/W4 /permissive- /WX)
+    add_compile_options(/W4 /permissive- /WX)
   else()
     # Clang/GCC
     add_compile_options(
@@ -62,8 +62,8 @@ FetchContent_MakeAvailable(ftxui)
 # Main Executable
 #==============================================================================
 add_executable(${PROJECT_NAME} src/main.cpp)
-# add_executable(${PROJECT_NAME} src/main_fail_sanitizer.cpp)
-# target_include_directories(${PROJECT_NAME} PRIVATE path/to/folder)
+# add_executable(${PROJECT_NAME} src/main_counter.cpp)
+# add_executable(${PROJECT_NAME} src/main_4_clicker.cpp)
 
 # Core dependencies (always included)
 target_link_libraries(
@@ -72,4 +72,3 @@ target_link_libraries(
           ftxui::dom
           ftxui::screen
           ftxui::component)
-# target_compile_definitions(${PROJECT_NAME} PRIVATE ANY_MACRO_HERE)
