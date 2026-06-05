@@ -124,7 +124,7 @@ static void draw_climate_screen(IEpaperDisplay& d, const ClimateData& data) {
     // dashed horizontal grid lines
     for (int gy = GY + 18; gy < GY + GH; gy += 18)
         for (int gx = GX + 2; gx < GX + GW; gx += 6)
-            d.drawPixel(static_cast<int16_t>(gx), static_cast<int16_t>(gy), GxEPD_BLACK);
+            d.drawPixel(gx, gy, GxEPD_BLACK);
 
     // plot history
     const auto& hist = data.temp_history;
@@ -148,15 +148,15 @@ static void draw_climate_screen(IEpaperDisplay& d, const ClimateData& data) {
             for (int s = 0; s < steps; ++s) {
                 int px = x0 + s;
                 int py = y0 + (y1 - y0) * s / steps;
-                d.drawPixel(static_cast<int16_t>(px), static_cast<int16_t>(py),     GxEPD_BLACK);
-                d.drawPixel(static_cast<int16_t>(px), static_cast<int16_t>(py + 1), GxEPD_BLACK);
+                d.drawPixel(px,     py, GxEPD_BLACK);
+                d.drawPixel(px, py + 1, GxEPD_BLACK);
             }
         }
 
         // min / max labels on y-axis
-        d.setCursor(0, static_cast<int16_t>(GY + GH - 6));
+        d.setCursor(0, GY + GH - 6);
         d.printf("%.0f", static_cast<double>(lo + 0.5f));
-        d.setCursor(0, static_cast<int16_t>(GY));
+        d.setCursor(0, GY);
         d.printf("%.0f", static_cast<double>(hi - 0.5f));
     }
 
