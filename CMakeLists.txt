@@ -68,7 +68,9 @@ FetchContent_MakeAvailable(ftxui)
 # E-Paper Emulator Example
 #==============================================================================
 add_executable(ftxui-epaper src/main_epaper.cpp)
-target_include_directories(ftxui-epaper PRIVATE src)
+target_include_directories(ftxui-epaper PRIVATE
+    src
+    C:/project-coding/iot/others-projects/E-Paper-Climate-Logger/firmware/src)
 target_link_libraries(
   ftxui-epaper
   PRIVATE fmt::fmt

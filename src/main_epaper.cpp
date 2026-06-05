@@ -1,8 +1,14 @@
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
+#include <deque>
+#include <mutex>
+#include <random>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <ftxui/component/component.hpp>
@@ -11,236 +17,313 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/color.hpp>
 
+#include "bitmaps.h" // firmware bitmaps — exact same arrays
 #include "epaper_display.hpp"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sample bitmaps (MSB-first, row-major, Adafruit-style)
+// Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-// 8×16 thermometer icon
-static constexpr uint8_t BMP_THERMOMETER[] = {
-    0b00011000,  // row  0   ##
-    0b00100100,  // row  1  #  #
-    0b00100100,  // row  2  #  #
-    0b00100100,  // row  3  #  #
-    0b00100100,  // row  4  #  #
-    0b00111100,  // row  5  ####
-    0b01111110,  // row  6 ######
-    0b01111110,  // row  7 ######
-    0b01111110,  // row  8 ######
-    0b01111110,  // row  9 ######
-    0b01111110,  // row 10 ######
-    0b00111100,  // row 11  ####
-    0b00011000,  // row 12   ##
-    0b00000000,  // row 13
-    0b00000000,  // row 14
-    0b00000000,  // row 15
-};
+static std::string current_time_str() {
+	std::time_t t = std::time(nullptr);
+	std::tm tm{};
+#if defined(_MSC_VER)
+	localtime_s(&tm, &t);
+#else
+	tm = *std::localtime(&t);
+#endif
+	char buf[8];
+	std::snprintf(buf, sizeof(buf), "%02d:%02d", tm.tm_hour, tm.tm_min);
+	return buf;
+}
 
-// 8×16 humidity / droplet icon
-static constexpr uint8_t BMP_DROPLET[] = {
-    0b00011000,  // row  0
-    0b00011000,  // row  1
-    0b00111100,  // row  2
-    0b01111110,  // row  3
-    0b11111111,  // row  4
-    0b11111111,  // row  5
-    0b11111111,  // row  6
-    0b11111111,  // row  7
-    0b01111110,  // row  8
-    0b00111100,  // row  9
-    0b00011000,  // row 10
-    0b00000000,  // row 11
-    0b00000000,  // row 12
-    0b00000000,  // row 13
-    0b00000000,  // row 14
-    0b00000000,  // row 15
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Climate screen — draws to any IEpaperDisplay* (firmware or emulator)
-// ─────────────────────────────────────────────────────────────────────────────
-struct ClimateData {
-    float temp;
-    float hum;
-    std::vector<float> temp_history; // 48 readings, oldest first
-    std::string timestamp;
-    int battery_pct;
-};
-
-static void draw_climate_screen(IEpaperDisplay& d, const ClimateData& data) {
-    d.fillScreen(GxEPD_WHITE);
-
-    // ── header bar (inverted) ────────────────────────────────────────────────
-    d.fillRect(0, 0, 200, 20, GxEPD_BLACK);
-    d.setCursor(6, 6);
-    d.print("  Climate Logger");
-
-    // battery indicator top-right (small rect + fill)
-    const int bat_x = 170, bat_y = 4;
-    d.drawRect(bat_x, bat_y, 22, 12, GxEPD_WHITE);
-    d.fillRect(bat_x + 22, bat_y + 3, 3, 6, GxEPD_WHITE); // terminal nub
-    const int fill_w = static_cast<int>(data.battery_pct * 20 / 100);
-    d.fillRect(bat_x + 1, bat_y + 1, fill_w, 10, GxEPD_WHITE);
-
-    d.drawHLine(0, 20, 200, GxEPD_BLACK);
-
-    // ── temperature block (left half, rows 20–90) ────────────────────────────
-    d.drawBitmap(6, 28, BMP_THERMOMETER, 8, 16, GxEPD_BLACK);
-    d.setCursor(20, 28);
-    d.print("TEMP");
-
-    d.setCursor(14, 48);
-    d.printf("%.1f", static_cast<double>(data.temp));
-    d.setCursor(68, 44);
-    d.print("o");  // degree approximation
-    d.setCursor(74, 48);
-    d.print("C");
-
-    // vertical divider
-    d.drawVLine(100, 20, 72, GxEPD_BLACK);
-
-    // ── humidity block (right half, rows 20–90) ──────────────────────────────
-    d.drawBitmap(106, 28, BMP_DROPLET, 8, 16, GxEPD_BLACK);
-    d.setCursor(120, 28);
-    d.print("HUM");
-
-    d.setCursor(114, 48);
-    d.printf("%.1f%%", static_cast<double>(data.hum));
-
-    d.drawHLine(0, 92, 200, GxEPD_BLACK);
-
-    // ── graph section (rows 92–188) ───────────────────────────────────────────
-    d.setCursor(4, 95);
-    d.print("24h Temperature");
-    d.drawHLine(0, 106, 200, GxEPD_BLACK);
-
-    // graph area
-    constexpr int GX = 8, GY = 110, GW = 186, GH = 72;
-
-    d.drawVLine(GX, GY, GH, GxEPD_BLACK);
-    d.drawHLine(GX, GY + GH, GW, GxEPD_BLACK);
-
-    // dashed horizontal grid lines
-    for (int gy = GY + 18; gy < GY + GH; gy += 18)
-        for (int gx = GX + 2; gx < GX + GW; gx += 6)
-            d.drawPixel(gx, gy, GxEPD_BLACK);
-
-    // plot history
-    const auto& hist = data.temp_history;
-    if (hist.size() >= 2) {
-        const float lo = *std::min_element(hist.begin(), hist.end()) - 0.5f;
-        const float hi = *std::max_element(hist.begin(), hist.end()) + 0.5f;
-        const float range = hi - lo;
-        const auto n = static_cast<int>(hist.size());
-
-        auto px_for = [&](int i) -> std::pair<int, int> {
-            int px = GX + 1 + (i * (GW - 2)) / (n - 1);
-            int py = GY + GH - 1 - static_cast<int>((hist[i] - lo) / range * (GH - 2));
-            return {px, py};
-        };
-
-        for (int i = 1; i < n; ++i) {
-            auto [x0, y0] = px_for(i - 1);
-            auto [x1, y1] = px_for(i);
-            // thick line: draw 2px height
-            int steps = std::abs(x1 - x0) + 1;
-            for (int s = 0; s < steps; ++s) {
-                int px = x0 + s;
-                int py = y0 + (y1 - y0) * s / steps;
-                d.drawPixel(px,     py, GxEPD_BLACK);
-                d.drawPixel(px, py + 1, GxEPD_BLACK);
-            }
-        }
-
-        // min / max labels on y-axis
-        d.setCursor(0, GY + GH - 6);
-        d.printf("%.0f", static_cast<double>(lo + 0.5f));
-        d.setCursor(0, GY);
-        d.printf("%.0f", static_cast<double>(hi - 0.5f));
-    }
-
-    d.drawHLine(0, 188, 200, GxEPD_BLACK);
-
-    // ── footer ────────────────────────────────────────────────────────────────
-    d.setCursor(4, 191);
-    d.printf("Updated: %s", data.timestamp.c_str());
-    d.setCursor(148, 191);
-    d.printf("Bat:%d%%", data.battery_pct);
+// Exact emoji selection from firmware app.cpp
+static const uint8_t *select_emoji(float temp_c) {
+	if (temp_c < -10)
+		return bitmaps::face_scary_2;
+	else if (temp_c < 0)
+		return bitmaps::face_scary_2;
+	else if (temp_c < 2)
+		return bitmaps::face_scary_1;
+	else if (temp_c < 4)
+		return bitmaps::face_death_1;
+	else if (temp_c < 10)
+		return bitmaps::face_cold_1;
+	else if (temp_c < 12)
+		return bitmaps::face_sad_1;
+	else if (temp_c < 14)
+		return bitmaps::face_neutral_1;
+	else if (temp_c < 16)
+		return bitmaps::face_neutral_2;
+	else if (temp_c < 18)
+		return bitmaps::face_neutral_3;
+	else if (temp_c < 20)
+		return bitmaps::face_happy_4;
+	else if (temp_c < 24)
+		return bitmaps::face_happy_2;
+	else if (temp_c < 26)
+		return bitmaps::face_happy_3;
+	else if (temp_c < 27)
+		return bitmaps::face_hot_1;
+	else if (temp_c < 28)
+		return bitmaps::face_hot_2;
+	else if (temp_c < 31)
+		return bitmaps::face_hot_3;
+	else if (temp_c < 33)
+		return bitmaps::face_hot_4;
+	else if (temp_c < 35)
+		return bitmaps::face_scary_1;
+	else
+		return bitmaps::face_empty_1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Generate plausible fake history data
+// Graph drawing — port of firmware App::drawGraph()
+//
+// Coordinates are in GxEPD2 firmware space (d->setRotation(2) already called).
+// left/right/bottom/top follow the firmware convention: bottom and top are
+// measured in pixels FROM THE PHYSICAL BOTTOM (i.e. y=disph-v in screen coords).
 // ─────────────────────────────────────────────────────────────────────────────
-static ClimateData make_sample_data(float temp_offset = 0.0f, float hum_offset = 0.0f) {
-    ClimateData d;
-    d.battery_pct = 87;
-    d.timestamp   = "14:32";
+static void draw_graph(IEpaperDisplay &d, int left, int right, int bottom, int top, const std::vector<float> &data) {
+	constexpr int disph = 199; // matches firmware: constexpr int disph = 199
 
-    for (int i = 0; i < 48; ++i) {
-        float t = 22.5f + temp_offset
-                + 2.5f * std::sin(static_cast<float>(i) * 0.18f)
-                + 0.8f * std::sin(static_cast<float>(i) * 0.9f);
-        d.temp_history.push_back(t);
-    }
-    d.temp = d.temp_history.back();
-    d.hum  = 63.0f + hum_offset;
-    return d;
+	if (left >= right || bottom >= top || data.empty())
+		return;
+
+	const int width = right - left;
+	const int height = top - bottom;
+
+	// Convert graph box to firmware screen coordinates
+	const int invt = disph - top;	 // firmware screen y for graph top edge
+	const int invb = disph - bottom; // firmware screen y for graph bottom edge
+
+	// Outline (exact firmware calls)
+	d.drawLine(left, invt, right, invt, GxEPD_BLACK);
+	d.drawLine(left, invb, right, invb, GxEPD_BLACK);
+	d.drawLine(left, invt, left, invb, GxEPD_BLACK);
+	d.drawLine(right, invt, right, invb, GxEPD_BLACK);
+
+	// Grid (dashed, alternating pixels — exact firmware pattern)
+	for (int i = 1; i < width - 1; i++) {
+		if (i % 2 != 0) {
+			d.drawPixel(left + i, invt + height / 2, GxEPD_BLACK);
+			d.drawPixel(left + i, invt + height / 4, GxEPD_BLACK);
+			d.drawPixel(left + i, invb - height / 4, GxEPD_BLACK);
+		}
+	}
+	for (int i = 1; i < height - 1; i++) {
+		if (i % 2 != 0) {
+			d.drawPixel(left + width / 2, invt + i, GxEPD_BLACK);
+			d.drawPixel(left + width / 4, invt + i, GxEPD_BLACK);
+			d.drawPixel(right - width / 4, invt + i, GxEPD_BLACK);
+		}
+	}
+
+	if (data.size() < 2)
+		return;
+
+	const int n = static_cast<int>(data.size());
+
+	// Min / max (firmware uses raw integer temperature × 100; we use float)
+	float fmin = *std::min_element(data.begin(), data.end());
+	float fmax = *std::max_element(data.begin(), data.end());
+	if (fmax - fmin < 0.5f) {
+		fmax = fmin + 0.5f;
+	} // prevent flat-line divide-by-zero
+
+	// Map a temperature value to firmware screen Y
+	auto mapY = [&](float v) -> int {
+		const float ratio = (v - fmin) / (fmax - fmin);
+		const int t_px = static_cast<int>(ratio * static_cast<float>(height - 1) + 0.5f);
+		return invb - t_px; // invb = low screen y, subtract → higher screen y for higher temp
+	};
+
+	// Polyline (firmware fast path: samples ≤ pixels)
+	const int64_t xStepQ16 = (n > 1) ? (((int64_t)width << 16) / (n - 1)) : 0;
+	int64_t fx = 0;
+	int prevX = left;
+	int prevY = mapY(data[0]);
+
+	for (int i = 1; i < n; ++i) {
+		fx += xStepQ16;
+		const int x = left + static_cast<int>((fx + (1 << 15)) >> 16);
+		const int y = mapY(data[i]);
+		d.drawLine(prevX, prevY, x, y, GxEPD_BLACK);
+		// second pass offset by 1px for a slightly thicker line (firmware uses 1.5px)
+		d.drawLine(prevX, prevY + 1, x, y + 1, GxEPD_BLACK);
+		prevX = x;
+		prevY = y;
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// main — FTXUI shell around the emulated e-paper
+// Standard display — exact layout mirroring firmware App::StandardDisplay()
+//
+// Coordinates are firmware coordinates with setRotation(2) active.
+// Bitmap calls are verbatim from the firmware source.
+// ─────────────────────────────────────────────────────────────────────────────
+static void draw_standard_display(IEpaperDisplay &d, float temp, float hum, const std::vector<float> &history,
+								  float prev_temp) {
+	d.setRotation(2); // exact firmware setting
+	d.fillScreen(GxEPD_WHITE);
+
+	// ── thermometer icon (exact firmware: drawBitmap(2, 0, thermometer32, 12, 32, black)) ──
+	d.drawBitmap(2, 0, bitmaps::thermometer32, 12, 32, GxEPD_BLACK);
+
+	// ── temperature value ────────────────────────────────────────────────────
+	// Firmware uses FreeMonoBold24pt7b and getTextBounds to position parts.
+	// We approximate with fixed offsets; the integers are placed at the same
+	// cursor origin (18, 29) as the firmware.
+	{
+		const int iv = static_cast<int>(temp);
+		const int dv = std::abs(static_cast<int>((temp - static_cast<float>(iv)) * 10));
+		d.setCursor(18, 29);
+		d.printf("%d", iv);
+		d.setCursor(38, 29); // decimal point
+		d.print(".");
+		d.setCursor(44, 29); // decimal digit
+		d.printf("%d", dv);
+		// degree symbol — exact firmware: drawBitmap(x1+w+40, 2, degree_symbol, 11, 11, black)
+		d.drawBitmap(60, 2, bitmaps::degree_symbol, 11, 11, GxEPD_BLACK);
+	}
+
+	// ── trend arrow (exact firmware: drawBitmap(128, 0, up/down_arrow, 15, 24, black)) ──
+	if (history.size() >= 2) {
+		if (temp > prev_temp)
+			d.drawBitmap(128, 0, bitmaps::up_arrow, 15, 24, GxEPD_BLACK);
+		else if (temp < prev_temp)
+			d.drawBitmap(128, 0, bitmaps::down_arrow, 15, 24, GxEPD_BLACK);
+	}
+
+	// ── emoji face (exact firmware: drawBitmap(151, 0, emoji, 48, 48, black)) ──
+	d.drawBitmap(151, 0, select_emoji(temp), 48, 48, GxEPD_BLACK);
+
+	// ── humidity ─────────────────────────────────────────────────────────────
+	// Exact firmware: drawBitmap(0, 37, water_drop, 17, 17, black)
+	d.drawBitmap(0, 37, bitmaps::water_drop, 17, 17, GxEPD_BLACK);
+	d.setCursor(20, 52);
+	d.printf("%d", static_cast<int>(std::roundf(hum)));
+	// Exact firmware: drawBitmap(x1+w+3, 38, percent_symbol_16, 16, 16, black)
+	// 2-digit hum text ≈ 12px wide → percent symbol at (20+12+3=35, 38)
+	d.drawBitmap(35, 38, bitmaps::percent_symbol_16, 16, 16, GxEPD_BLACK);
+
+	// ── clock + time ─────────────────────────────────────────────────────────
+	// Exact firmware: drawBitmap(0, 58, clock, 17, 17, black)
+	d.drawBitmap(0, 58, bitmaps::clock, 17, 17, GxEPD_BLACK);
+	d.setCursor(20, 73);
+	d.print(current_time_str());
+
+	// ── graph (exact firmware: drawGraph(0, 199, 13, 118, data, count, ...)) ──
+	const int n = static_cast<int>(history.size());
+	if (n >= 2) {
+		draw_graph(d, 0, 199, 13, 118, history);
+
+		const float fmin = *std::min_element(history.begin(), history.end());
+		const float fmax = *std::max_element(history.begin(), history.end());
+
+		// Graph axis labels — exact firmware cursor positions
+		d.setCursor(0, 199);
+		d.printf("T-%dm", n);
+
+		d.setCursor(140, 199);
+		d.printf("%.1f", static_cast<double>(fmin));
+
+		d.setCursor(140, 79);
+		d.printf("%.1f", static_cast<double>(fmax));
+	} else {
+		d.setCursor(0, 199);
+		d.print("No data");
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared simulation state (written by updater thread, read by renderer)
+// ─────────────────────────────────────────────────────────────────────────────
+struct SimState {
+	std::deque<float> history; // temperature readings, oldest first
+	float temp = 0.0f;
+	float hum = 60.0f;
+	float prev_temp = 0.0f;
+	bool dirty = true;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// main
 // ─────────────────────────────────────────────────────────────────────────────
 int main() {
-    std::srand(static_cast<unsigned>(std::time(nullptr)));
+	EpaperBuffer epaper;
+	draw_standard_display(epaper, 0, 0, {}, 0); // initial: "No data" state
 
-    EpaperBuffer epaper;
-    auto data = make_sample_data();
+	std::mutex state_mtx;
+	SimState state;
+	std::atomic<bool> quit{false};
 
-    // initial draw
-    draw_climate_screen(epaper, data);
+	using namespace ftxui;
 
-    using namespace ftxui;
+	auto screen = ScreenInteractive::Fullscreen();
 
-    auto screen = ScreenInteractive::Fullscreen();
+	// ── background temperature simulator ─────────────────────────────────────
+	std::thread updater([&] {
+		std::mt19937 rng(42);
+		std::normal_distribution<float> drift(0.0f, 0.12f);
+		std::normal_distribution<float> hum_drift(0.0f, 0.3f);
+		float t = 21.5f, h = 62.0f;
 
-    // Wrap canvas in e-paper colors (white bg, black ink)
-    auto epaper_element = [&]() -> Element {
-        return color(Color::Black,
-               bgcolor(Color::White,
-               epaper.render()));
-    };
+		while (!quit) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(400));
 
-    auto renderer = Renderer([&] {
-        return vbox({
-            text("E-Paper Emulator  —  GxEPD2_154_D67  (200×200 px)") | bold | hcenter,
-            separator(),
-            hbox({ filler(), epaper_element(), filler() }),
-            separator(),
-            hbox({
-                filler(),
-                text("[R] refresh data   [Q] quit") | dim,
-                filler(),
-            }),
-        });
-    });
+			const float prev = t;
+			t += drift(rng);
+			t = std::clamp(t, 5.0f, 38.0f);
+			h += hum_drift(rng);
+			h = std::clamp(h, 20.0f, 95.0f);
 
-    float offset = 0.0f;
-    auto component = CatchEvent(renderer, [&](Event event) -> bool {
-        if (event == Event::Character('q') || event == Event::Character('Q')) {
-            screen.ExitLoopClosure()();
-            return true;
-        }
-        if (event == Event::Character('r') || event == Event::Character('R')) {
-            offset += 1.5f;
-            data = make_sample_data(offset, static_cast<float>(std::rand() % 20) - 10.0f);
-            epaper.reset();
-            draw_climate_screen(epaper, data);
-            return true;
-        }
-        return false;
-    });
+			{
+				std::lock_guard lock(state_mtx);
+				state.prev_temp = prev;
+				state.temp = t;
+				state.hum = h;
+				state.history.push_back(t);
+				if (state.history.size() > 190) // keep ≤ one reading per graph pixel
+					state.history.pop_front();
+				state.dirty = true;
+			}
+			screen.PostEvent(Event::Custom);
+		}
+	});
 
-    screen.Loop(component);
-    return 0;
+	// ── FTXUI component ───────────────────────────────────────────────────────
+	auto component = Renderer([&] {
+		// Re-draw the epaper buffer only when new data arrived
+		{
+			std::lock_guard lock(state_mtx);
+			if (state.dirty) {
+				const std::vector<float> hist(state.history.begin(), state.history.end());
+				epaper.reset();
+				draw_standard_display(epaper, state.temp, state.hum, hist, state.prev_temp);
+				state.dirty = false;
+			}
+		}
+
+		return vbox({
+			text(" E-Paper Emulator — GxEPD2_154_D67  (200×200 px)") | bold | hcenter,
+			separator(),
+			hbox({filler(), color(Color::Black, bgcolor(Color::White, epaper.render())), filler()}),
+			separator(),
+			text(" [Q] quit") | dim | hcenter,
+		});
+	});
+
+	component = CatchEvent(component, [&](Event event) {
+		if (event == Event::Character('q') || event == Event::Character('Q')) {
+			screen.ExitLoopClosure()();
+			return true;
+		}
+		return false;
+	});
+
+	screen.Loop(component);
+	quit = true;
+	updater.join();
+	return 0;
 }
