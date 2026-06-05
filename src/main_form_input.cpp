@@ -33,9 +33,10 @@ int main() {
 	// The phone number input component:
 	// We are using `CatchEvent` to filter out non-digit characters.
 	Component input_phone_number = Input(&phoneNumber, "phone number");
-	input_phone_number |=
-		CatchEvent([&](Event event) { return event.is_character() && !std::isdigit(event.character()[0]); });
+	// clang-format off
+	input_phone_number |= CatchEvent([&](Event event) { return event.is_character() && !std::isdigit(event.character()[0]); });
 	input_phone_number |= CatchEvent([&](Event event) { return event.is_character() && phoneNumber.size() > 10; });
+	// clang-format on
 
 	// The component tree:
 	auto component = Container::Vertical({

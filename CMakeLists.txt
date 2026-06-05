@@ -43,7 +43,6 @@ FetchContent_Declare(
   ftxui
   GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI
   GIT_TAG main)
-
 FetchContent_MakeAvailable(ftxui)
 
 #==============================================================================
@@ -53,7 +52,7 @@ FetchContent_MakeAvailable(ftxui)
 #==============================================================================
 # Main Executable
 #==============================================================================
-add_executable(${PROJECT_NAME} src/main.cpp)
+add_executable(${PROJECT_NAME} src/main_form_input.cpp)
 # add_executable(${PROJECT_NAME} src/main_counter.cpp)
 # add_executable(${PROJECT_NAME} src/main_4_clicker.cpp)
 
