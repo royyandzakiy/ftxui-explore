@@ -12,14 +12,6 @@ project(
   VERSION 1.0.0)
 
 #==============================================================================
-# Version Management
-#==============================================================================
-include(cmake/version.cmake)
-generate_version_header()
-source_group("Generated" FILES "${CMAKE_CURRENT_SOURCE_DIR}/include/version.h")
-message(STATUS "Building ${PROJECT_NAME} version ${PROJECT_VERSION}")
-
-#==============================================================================
 # Compiler Configuration
 #==============================================================================
 set(CMAKE_CXX_STANDARD 23)
